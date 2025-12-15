@@ -1,12 +1,13 @@
 import streamlit as st
 import yt_dlp
 import os
-import tempfile # <--- New import for safe cloud file handling
+import tempfile
 
 # Page Config
-st.set_page_config(page_title="Twitter Downloader", page_icon="⬇️")
+st.set_page_config(page_title="VP Twitter Downloader", page_icon="⬇️")
 
-st.title("⬇️ Internal Video Downloader")
+# --- CHANGED TITLE HERE ---
+st.title("⬇️ VP Twitter Broadcast Downloader")
 st.write("Paste a Twitter/X broadcast link below.")
 
 # Input
@@ -19,28 +20,39 @@ def download_video(link):
     def progress_hook(d):
         if d['status'] == 'downloading':
             try:
-                total = d.get('total_bytes') or d.get('total_bytes_estimate')
-                downloaded = d.get('downloaded_bytes', 0)
-                if total:
+                p = 0.0
+                # Method 1: Calculate by Bytes (Standard videos)
+                if d.get('total_bytes') or d.get('total_bytes_estimate'):
+                    total = d.get('total_bytes') or d.get('total_bytes_estimate')
+                    downloaded = d.get('downloaded_bytes', 0)
                     p = downloaded / total
-                    progress_bar.progress(max(0.0, min(1.0, p)))
-                    status_text.text(f"Downloading: {int(p * 100)}%")
-                else:
-                    status_text.text("Downloading stream...")
-            except:
-                pass
+                
+                # Method 2: Calculate by Fragments (Twitter Broadcasts/HLS)
+                # This fixes the "Grey Bar" issue
+                elif d.get('fragment_index') and d.get('fragment_count'):
+                    current = d.get('fragment_index')
+                    total_frags = d.get('fragment_count')
+                    p = current / total_frags
+
+                # Update the UI
+                clean_p = max(0.0, min(1.0, p))
+                progress_bar.progress(clean_p)
+                status_text.text(f"Downloading: {int(clean_p * 100)}%")
+                
+            except Exception:
+                pass # Keep going if calculation fails slightly
+                
         elif d['status'] == 'finished':
             status_text.text("Processing video... (Stitching chunks)")
             progress_bar.progress(1.0)
 
-    # Use a temporary directory that is guaranteed to be writable and clean
+    # Use a temporary directory for cloud stability
     with tempfile.TemporaryDirectory() as tmpdirname:
         
-        # Configure yt-dlp for CLOUD reliability
         ydl_opts = {
-            'outtmpl': f'{tmpdirname}/%(title).50s.%(ext)s', # Use temp folder + Short name
-            'restrictfilenames': True,  # Remove emojis/spaces that break Linux paths
-            'concurrent_fragment_downloads': 4, # LOWERED from 15 to 4 for server stability
+            'outtmpl': f'{tmpdirname}/%(title).50s.%(ext)s',
+            'restrictfilenames': True,
+            'concurrent_fragment_downloads': 4,
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': True,
@@ -52,8 +64,7 @@ def download_video(link):
                 info = ydl.extract_info(link, download=True)
                 filename = ydl.prepare_filename(info)
                 
-                # We must read the file into memory to serve it, 
-                # because the temp folder disappears when this function ends.
+                # Read into memory
                 with open(filename, "rb") as f:
                     return f.read(), os.path.basename(filename)
                     
@@ -64,8 +75,7 @@ def download_video(link):
 # Button
 if st.button("Download Video"):
     if url:
-        with st.spinner('Downloading... (This may take a minute)'):
-            # Get the file data directly into memory
+        with st.spinner('Downloading...'):
             video_data, video_name = download_video(url)
             
             if video_data:
